@@ -14,7 +14,10 @@ interaction with Gambit might be a little 'rough' for now.
 Don't hesitate to bug me (guillaume.germain@gmail.com) if something
 doesn't work as it should, if you have questions or if you have
 feature requests.
+
+
 --------------------------------------------------------
+
 The official termite version in chicken scheme 4 looks like has some
 configuration errors, some functions cannot be found in runtime.
 So I changed some setup configurations, and it can be used at least.
