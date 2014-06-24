@@ -19,23 +19,41 @@ feature requests.
 --------------------------------------------------------
 
 The official termite version in chicken scheme 4 looks like has some
+
 configuration errors, some functions cannot be found in runtime.
+
 So I changed some setup configurations, and it can be used at least.
+
 But there are still some of them cannot be found.
+
 These are:
+
 !pid(in proxy)
+
 halt!(in migrate_tast)
+
 catch
+
 with-exception-catcher    g516
+
 handle-exception-message (in g516,g268)
+
 local_loading   (in start_meter)
+
 dict-set  (in g551)
+
 pid-node  (in g552)
+
 find-min  (in g552)
+
 dict      (in g552)
+
 list-average  (in g553)
+
 migrate   (in start-meter-suppervisor)
+
 *node-list* (in start-meter-suppervisor)
+
 spawn-supervised thunk start-pong-server
 
 
