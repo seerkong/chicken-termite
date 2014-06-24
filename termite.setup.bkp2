@@ -1,0 +1,10 @@
+;(compile -s termite.scm -o termite.so -j termite)
+;(compile -s termite.import.scm)
+
+(compile -s -O3 -d1 "termite.scm" -j termite)
+(compile -s -O3 -d0 "termite.import.scm")
+(install-extension
+   'termite
+   '("termite.so" "termite.import.so")
+   '((version 1.0)
+     (documentation "README")))

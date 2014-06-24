@@ -1,0 +1,285 @@
+;; File: "termite#.scm"
+;; Copyright (C) 2005-2008 Guillaume Germain
+
+;; This is the declaration file for the Termite system
+(module termite
+   (
+      ;; Termite "primordials"
+      self ! ? ?? !? on make-node spawn pid? 
+      spawn-link remote-spawn remote-spawn-link
+      ;; Useful
+			  make-tag current-node
+			  ;; Process linking for error propagation
+			  inbound-link outbound-link full-link
+			  ;; Wrap Gambit's I/O
+			  spawn-output-port spawn-input-port
+			  ;; Exceptions...
+			  termite-exception? ;; actually that has to be exported for RECV ... 
+			  ;; Migration
+			  migrate-task migrate/proxy 
+			  ;; Useful condition reporting/logging procedures
+			  warning debug info
+			  ;; Node stuff
+			  node-init node? node-host node-port 
+			  ;; Nameserver mechanism
+			  ;;make-nameserver-node 
+			  ;; OTP-style stuff (genserver)
+			  make-server-plugin server:start server:start-link 
+			  server:call server:cast server:stop 
+			  ;; Distributed data structures
+			  make-dict dict? dict->list dict-for-each dict-search 
+			  dict-set! dict-ref dict-length
+			  ;; Publishing and resolving names for services
+			  publish-service unpublish-service resolve-service remote-service
+			  ;; default init and node names for convenience
+			  ;;init
+                          node1 node2
+			  ;;*termite-nameserver-port*
+			  ;;*termite-cookie*
+			  ;; Useful
+			  ping
+			  )
+(import chicken scheme)
+(use srfi-1 srfi-4 srfi-18 mailbox mailbox-threads tcp)
+(use extras posix ports defstruct)
+(require-library lookup-table s11n)
+;(require-extension termite-match termite-recv termite-deftype)
+(import (prefix lookup-table chicken:))
+(import (prefix s11n s11n:))
+
+(define-syntax (compile-time-load form r c)
+  (let ((filename (cadr form)))
+  `(,(r 'load) ,filename)))
+
+;implement or rename gambit functions to match their
+;chicken equivalents
+(include "gambit-glue.scm")
+
+;; make it available at run-time
+(import-for-syntax chicken scheme)
+(begin-for-syntax 
+(include "match-support.scm")
+(include "match.scm")
+)
+
+
+;; ----------------------------------------------------------------------------
+;; Macros 
+
+(define-syntax (match/action x r c)
+  (let ((on-success (cadr x))
+        (on-fail (caddr x))
+        (datum (cadddr x))
+        (clauses (cddddr x))
+        (%let (r 'let))
+        (%tmp (r 'tmp))
+        (%succ (r 'succ))
+        (%fail (r 'fail))
+        (%lambda (r 'lambda)))
+    `(,%let ((,%tmp ,datum)
+	   (,%succ (,%lambda() ,on-success)) ;; the thunk for success is lifted
+	   (,%fail (,%lambda() ,on-fail)))   ;; the thunk for failure is lifted
+       ,(compile-pattern-match `(,%succ) `(,%fail) clauses %tmp))))
+
+;;(define-macro (match datum . clauses)
+(define-syntax (match x r c)
+  (let ((datum (cadr x))
+        (clauses (cddr x))
+        (tmp (r 'tmp))
+	(fail (r 'fail))
+        (%lambda (r 'lambda))
+        (%let* (r 'let*))
+        (%raise (r 'raise))
+        (%list (r 'list)))
+
+	`(,%let* ((,tmp ,datum)
+			(,fail (,%lambda () 
+					 (,%raise 
+					   (,%list bad-match: ,tmp)))))
+	   ,(compile-pattern-match
+		  #f 
+		  `(,fail)
+		  clauses
+		  tmp))))
+
+
+;; All hail the RECV form
+(define-syntax (recv x r c)
+  (let ((clauses (cdr x))
+        (%msg  (r 'msg))   ;; the current mailbox message
+        (%loop (r 'loop)) ;; the mailbox seeking loop
+        (%with-exception-handler (r 'with-exception-handler))
+        (%lambda (r 'lambda))
+        (%mailbox-timeout-exception?
+           (r 'mailbox-timeout-exception?))
+        (%begin (r 'begin))
+        (%thread-mailbox-rewind (r 'thread-mailbox-rewind))
+        (%thread-mailbox-extract-and-rewind
+           (r 'thread-mailbox-extract-and-rewind))
+        (%thread-mailbox-next (r 'thread-mailbox-next))
+        (%handle-exception-message (r 'handle-exception-message))
+        (%match/action (r 'match/action))
+        (%raise (r 'raise))
+        (%event (r 'event))
+        (%termite-exception? (r 'termite-exception?))
+        (%if (r 'if))
+        (%let (r 'let)))
+    ;; check the last clause to see if it's a timeout
+    (let ((sesualc (reverse clauses)))
+      (if (and (pair? (car sesualc))
+               (eq? (caar sesualc) 'after))
+
+          (let ((clauses (reverse (cdr sesualc)))
+                ;; the code to compute the timeout
+                (init (cadar sesualc))
+                ;; the variable holding the timeout
+                (timeout (r 'timeout))
+                ;; the code to be executed on a timeout
+                (on-timeout (cddar sesualc))
+                ;; the timeout exception-handler to the whole match
+                (%e (r 'e)))
+
+            ;; RECV code when there is a timeout
+            `(,%let ((,timeout ,init))
+               (,%with-exception-handler
+                (,%lambda (,%e)
+                  (,%if (,%mailbox-timeout-exception? ,%e)
+                      (,%begin
+                        (,%thread-mailbox-rewind)
+                        ,@on-timeout)
+                      (,%raise ,%e)))
+                (,%lambda ()
+                  (,%let ,%loop ((,%msg (,%thread-mailbox-next ,timeout)))
+                       (,%match/action
+                        (,%thread-mailbox-extract-and-rewind)
+                        (,%loop 
+                         (,%thread-mailbox-next ,timeout))
+                        ,%msg
+                        ;; extra clause to handle system events
+                        (,%event 
+                         (where (,%termite-exception? ,%event))
+                         (,%handle-exception-message ,%event))
+                        ;; the user clauses
+                        ,@clauses))))))
+
+          ;; RECV code when there is no timeout
+          `(,%let ,%loop ((,%msg (,%thread-mailbox-next)))
+                (,%match/action
+                 (,%thread-mailbox-extract-and-rewind)
+                 (,%loop
+                  (,%thread-mailbox-next))
+                 ,%msg
+                 ;; extra clause to handle system events
+		 (,%event 
+		  (where (,%termite-exception? ,%event))
+		  (,%handle-exception-message ,%event))
+                 ;; the user clauses
+                 ,@clauses))))))
+
+
+;; 'define-type'-like functionality for Termite
+;;
+;; Mutable record created with this are implemented as processes.
+
+;;(define-macro (define-termite-type type id tag . fields)
+(define-syntax (define-termite-type body r c)
+  (let ((type (cadr body))
+        (id (caddr body))
+        (tag (cadddr body))
+        (fields (cadddr (cdr body))))
+
+  (define (symbol-append . symbols)
+    (string->symbol
+     (apply
+      string-append
+      (map symbol->string symbols))))
+  
+  (define (make-maker type)
+    (symbol-append 'make '- type))
+  
+  (define (make-getter type field)
+    (symbol-append type '- field))
+  
+  (define (make-setter type field)
+    (symbol-append type '- field '-set!))
+  
+  (if (not (eq? id id:))
+      (error "id: is mandatory in define-termite-type"))
+  
+  (let* ((maker (make-maker type))
+         (getters (map (lambda (field) 
+                         (make-getter type field)) 
+                       fields))
+         (setters (map (lambda (field) 
+                         (make-setter type field)) 
+                       fields))
+         
+         (internal-type (r 'type))
+         (internal-maker (make-maker internal-type))
+         (internal-getters (map (lambda (field) 
+                                  (make-getter internal-type field))
+                                fields))
+         (internal-setters (map (lambda (field)
+                                  (make-setter internal-type field))
+                                fields))
+         
+         (facade-maker (r 'maker))
+         (plugin (r '(symbol-append type '-plugin)))
+         
+         (pid (r 'pid)))
+    
+    `(,(r 'begin)
+       (,(r 'define-record) ,type
+         id: ,tag
+         constructor: ,facade-maker
+         unprintable:
+         ,pid)
+       
+       (,(r 'define-record) ,internal-type
+         ,@fields)
+       
+       (,(r 'define) ,plugin
+         (,(r 'make-server-plugin)
+          ;; init
+          (,(r 'lambda) ,(r 'args)
+            (,(r 'apply) ,internal-maker ,(r 'args)))
+          ;; call
+          (,(r 'lambda) (term state)
+            (,(r 'match) term
+              ,@((r 'map) ((r 'lambda) ((r 'getter) internal-getter)
+                       `(',(r 'getter) (,(r 'values) (,internal-getter state) state)))
+                     getters
+                     internal-getters)))
+          ;; cast
+          (,(r 'lambda) (term state)
+            (,(r 'match) term
+              ,@((r 'map) ((r 'lambda) (setter internal-setter)
+                       `((',setter x) (,internal-setter state x) state))
+                     setters
+                     internal-setters)))
+          ;; terminate
+          (,(r 'lambda) (reason state)
+            (void))))
+       
+       (,(r 'define) (,maker ,@fields)
+         (,facade-maker (server:start ,plugin (list ,@fields) name: ',type)))
+       
+       ,@((r 'map) (lambda (getter)
+                `(,(r 'define) (,getter x)
+                   ((,r 'server:call) (,(make-getter type pid) x) 
+                                ',getter)))
+              getters)
+
+       ,@((r 'map) ((r 'lambda) (setter)
+                `(,(r 'define) (,setter x value)
+                   (,(r 'server:cast) (,(make-getter type pid) x) 
+                                (,(r 'list) ',setter value))))
+              setters)))))
+;(include "match.scm")
+;(include "recv.scm")
+;(include "deftype.scm")
+(include "uuid.scm")
+
+(include "termite-core.scm")
+
+)

@@ -1,0 +1,96 @@
+; -*- Hen -*-
+
+(define (dynld-name fn)		
+  (make-pathname #f fn ##sys#load-dynamic-extension))	
+
+
+(use make)
+
+(make (
+       ((dynld-name "termite-match") ("termite-match.scm")
+	(compile -O -d2 -S -s termite-match.scm -j termite-match)) 
+
+       ((dynld-name "termite-match.import") ("termite-match.import.scm")
+	(compile -O2 -s termite-match.import.scm)) 
+       )
+  (list (dynld-name "termite-match")
+	(dynld-name "termite-match.import"))
+  )
+
+(install-extension
+
+  ; Name of your extension:
+  'termite-match
+
+  ; Files to install for your extension:
+  `(,(dynld-name "termite-match") ,(dynld-name "termite-match.import") )
+
+  ; Assoc list with properties for your extension:
+  `((version 1.0)))
+
+(make (
+       ((dynld-name "termite-recv") ("termite-recv.scm")
+	(compile -O -d2 -S -s termite-recv.scm -j termite-recv)) 
+
+       ((dynld-name "termite-recv.import") ("termite-recv.import.scm")
+	(compile -O2 -s termite-recv.import.scm)) 
+       )
+  (list (dynld-name "termite-recv")
+	(dynld-name "termite-recv.import"))
+  )
+
+(install-extension
+
+  ; Name of your extension:
+  'termite-recv
+
+  ; Files to install for your extension:
+  `(,(dynld-name "termite-recv") ,(dynld-name "termite-recv.import") )
+
+  ; Assoc list with properties for your extension:
+  `((version 1.0)))
+
+(make (
+       ((dynld-name "termite-deftype") ("termite-deftype.scm")
+	(compile -O -d2 -S -s termite-deftype.scm -j termite-deftype)) 
+
+       ((dynld-name "termite-deftype.import") ("termite-deftype.import.scm")
+	(compile -O2 -s termite-deftype.import.scm)) 
+       )
+  (list (dynld-name "termite-deftype")
+	(dynld-name "termite-deftype.import"))
+  )
+
+(install-extension
+
+  ; Name of your extension:
+  'termite-deftype
+
+  ; Files to install for your extension:
+  `(,(dynld-name "termite-deftype") ,(dynld-name "termite-deftype.import") )
+
+  ; Assoc list with properties for your extension:
+  `((version 1.0)))
+
+(make (
+       ((dynld-name "termite") ("termite.scm")
+	(compile -O -d2 -S -s termite.scm -j termite)) 
+
+       ((dynld-name "termite.import") ("termite.import.scm")
+	(compile -O2 -s termite.import.scm)) 
+       )
+  (list (dynld-name "termite")
+	(dynld-name "termite.import"))
+  )
+
+(install-extension
+
+  ; Name of your extension:
+  'termite
+  ; Files to install for your extension:
+
+  `(,(dynld-name "termite") ,(dynld-name "termite.import") )
+
+  ; Assoc list with properties for your extension:
+  `((version 1.0)))
+
